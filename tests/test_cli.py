@@ -37,8 +37,12 @@ class TestCollapse(unittest.TestCase):
         self.assertEqual(out, "a\n\nb\n")
 
     def test_strict_empty(self):
+        # With --strict-empty, a " "-only line is NOT blank: it passes through
+        # and interrupts the blank run.
         code, out = run(["--strict-empty", "-"], "a\n \n\nb\n")
-        self.assertEqual(out, "a\n \nb\n")
+        self.assertEqual(out, "a\n \n\nb\n")
+        code, out = run(["--strict-empty", "-"], "a\n\n\n\nb\n")
+        self.assertEqual(out, "a\n\nb\n")
 
     def test_check_violation(self):
         code, out = run(["--check", "-"], "a\n\n\nb\n")
