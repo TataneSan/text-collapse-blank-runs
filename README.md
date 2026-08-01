@@ -1,19 +1,20 @@
 # text-collapse-blank-runs
 
-Collapse runs of consecutive blank lines in a text file down to at most N
-(default 1) — like `cat -s`, but with a configurable cap and a lint mode.
-
-Pure Python standard library. No dependencies.
+Collapse runs of consecutive blank lines into at most N blank lines
+(default 1). Reads from a file or stdin, writes the result to stdout.
 
 ## Features
 
-- Keeps at most `--max N` consecutive blank lines (N can be 0)
-- Whitespace-only lines count as blank by default, `--strict-empty` opts out
-- `--check` lint mode lists oversized runs and exits 2 (CI-friendly)
+- Collapses any run of blank (empty or whitespace-only) lines into a single
+  one by default; `--max N` keeps up to N blank lines
+- `--whitespace-blank` considers lines containing only spaces/tabs as blank
+  (default: yes; use `--no-whitespace-blank` for strict empty lines)
+- Preserves the trailing newline of the input
+- `--check` CI mode: exit 2 when the file contains a run longer than the limit
 - `--json` machine-readable report
-- Reads stdin when the file is omitted or `-`
+- Pure standard library, Python >= 3.9
 
-## Install
+## Installation
 
 ```bash
 pip install .
@@ -24,30 +25,41 @@ pip install git+https://github.com/TataneSan/text-collapse-blank-runs.git
 ## Usage
 
 ```bash
-text-collapse-blank-runs notes.txt
-text-collapse-blank-runs --max 0 file.txt            # remove all blank lines
-cat doc.md | text-collapse-blank-runs --max 2 -
-text-collapse-blank-runs --check --max 1 doc.md      # lint: exit 2 when runs exceed 1
-text-collapse-blank-runs --check --json doc.md       # lint report as JSON
+# Basic: collapse to 1 blank line max (stdin)
+printf 'a\n\n\n\nb\n' | text-collapse-blank-runs -
+# a
+# 
+# b
+
+# Keep up to 2 blank lines
+text-collapse-blank-runs --max 2 long-doc.txt
+
+# Strict mode: only truly empty lines count
+text-collapse-blank-runs --no-whitespace-blank spaced.txt
+
+# CI check: exit 2 if any run exceeds N blanks
+text-collapse-blank-runs --check --max 1 file.txt
+
+# JSON report
+text-collapse-blank-runs --json file.txt
 ```
 
-## Example
+### Options
 
-```bash
-$ printf 'a\n\n\n\nb\n' | text-collapse-blank-runs -
-a
-
-b
-```
+| Flag | Description |
+|---|---|
+| `--max N` | maximum consecutive blank lines to keep (default 1) |
+| `--whitespace-blank` / `--no-whitespace-blank` | whitespace-only lines count as blank (default: yes) |
+| `--check` | only verify, exit 2 if a run exceeds N blanks |
+| `--json` | emit a JSON report |
+| `-q, --quiet` | in check mode, suppress non-JSON output |
 
 ## Exit codes
 
-| Code | Meaning                                          |
-| ---: | ------------------------------------------------ |
-|    0 | Success                                          |
-|    1 | I/O or CLI error                                 |
-|    2 | `--check` and a blank run exceeds `--max`        |
+- `0` — success (or check passed)
+- `1` — I/O or CLI error
+- `2` — check failed (at least one run exceeds the limit)
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

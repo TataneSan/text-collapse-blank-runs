@@ -1,99 +1,122 @@
-#!/usr/bin/env python3
-"""Collapse runs of consecutive blank lines to at most N.
+"""Collapse runs of consecutive blank lines into at most N blank lines.
 
-Reads a text file (or stdin) and rewrites it so that no more than --max
-(default 1) consecutive blank lines occur. A line is blank when it contains
-no non-whitespace characters (with --whitespace-blank, the default) or when
-it is strictly empty (with --strict-empty).
+Reads from stdin or a file, writes the collapsed text to stdout. Blank means
+empty or whitespace-only (--no-whitespace-blank to require strictly empty).
 
 Exit codes:
-  0  success
-  1  I/O or CLI error
-  2  --check mode: input contains at least one run longer than --max
+    0 - success (or check passed)
+    1 - I/O or CLI error
+    2 - --check mode and at least one run exceeds the limit
 """
+
+from __future__ import annotations
+
 import argparse
 import json
 import sys
 
 
-def parse_args(argv=None):
-    p = argparse.ArgumentParser(
-        description="Collapse runs of consecutive blank lines to at most N."
+def _parse_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="text-collapse-blank-runs",
+        description="Collapse runs of consecutive blank lines into at most N blank lines.",
     )
-    p.add_argument("file", nargs="?", default="-",
-                   help="Text file to read (default: stdin, use '-' for stdin)")
-    p.add_argument("--max", type=int, default=1,
-                   help="Maximum consecutive blank lines kept (default: 1)")
-    p.add_argument("--strict-empty", action="store_true",
-                   help="Only strictly empty lines count as blank (default: whitespace-only also counts)")
-    p.add_argument("--check", action="store_true",
-                   help="Lint mode: print the collapsible runs and exit 2 when any run exceeds --max")
-    p.add_argument("--json", action="store_true", help="Emit a JSON report (with --check)")
-    return p.parse_args(argv)
+    parser.add_argument("file", nargs="?", default="-",
+                        help="text file to read (default: stdin).")
+    parser.add_argument("--max", type=int, default=1, metavar="N",
+                        help="maximum consecutive blank lines to keep (default: 1).")
+    parser.add_argument("--whitespace-blank", dest="whitespace_blank",
+                        action="store_true", default=True,
+                        help="whitespace-only lines count as blank (default).")
+    parser.add_argument("--no-whitespace-blank", dest="whitespace_blank",
+                        action="store_false",
+                        help="require strictly empty lines (no spaces/tabs).")
+    parser.add_argument("--check", action="store_true",
+                        help="only verify; exit 2 if a run exceeds the limit.")
+    parser.add_argument("--json", action="store_true",
+                        help="emit a JSON report.")
+    parser.add_argument("-q", "--quiet", action="store_true",
+                        help="in check mode, suppress non-JSON output.")
+    return parser.parse_args(argv)
+
+
+def _is_blank(line, whitespace_blank):
+    if line == "":
+        return True
+    if whitespace_blank:
+        return line.strip(" \t") == ""
+    return False
+
+
+def _process(text, max_blanks, whitespace_blank):
+    """Return (out_text, total_runs, violating_runs)."""
+    trailing = text.endswith("\n")
+    lines = text.split("\n")
+    if trailing:
+        lines.pop()
+    out = []
+    runs = 0
+    violating = 0
+    run = 0
+    for line in lines:
+        if _is_blank(line, whitespace_blank):
+            run += 1
+            if run <= max_blanks:
+                out.append("")
+        else:
+            if run > 0:
+                runs += 1
+                if run > max_blanks:
+                    violating += 1
+            run = 0
+            out.append(line)
+    if run > 0:
+        runs += 1
+        if run > max_blanks:
+            violating += 1
+    out_text = "\n".join(out)
+    if trailing:
+        out_text += "\n"
+    return out_text, runs, violating
 
 
 def main(argv=None):
-    args = parse_args(argv)
+    args = _parse_args(argv)
     if args.max < 0:
         print("error: --max must be >= 0", file=sys.stderr)
         return 1
 
-    def is_blank(line):
-        s = line.rstrip("\n").rstrip("\r")
-        return s == "" if args.strict_empty else s.strip() == ""
-
     try:
-        fh = sys.stdin if args.file == "-" else open(args.file, encoding="utf-8")
-    except OSError as e:
-        print(f"error: cannot open {args.file}: {e}", file=sys.stderr)
+        if args.file == "-":
+            text = sys.stdin.read()
+        else:
+            with open(args.file, "r", encoding="utf-8") as fh:
+                text = fh.read()
+    except OSError as exc:
+        print(f"error: cannot read {args.file}: {exc}", file=sys.stderr)
         return 1
 
-    out_lines = []
-    runs = []       # (start_line, length) of each run longer than --max
-    run_start = None
-    run_len = 0
-    total_lines = 0
-    blanks_removed = 0
-
-    with fh:
-        for n, line in enumerate(fh, 1):
-            total_lines = n
-            stripped = line.rstrip("\n").rstrip("\r")
-            if is_blank(line):
-                if run_start is None:
-                    run_start = n
-                run_len += 1
-                if run_len <= args.max:
-                    out_lines.append("")
-                else:
-                    blanks_removed += 1
-            else:
-                if run_start is not None and run_len > args.max:
-                    runs.append({"start": run_start, "length": run_len})
-                run_start = None
-                run_len = 0
-                out_lines.append(stripped)
-        if run_start is not None and run_len > args.max:
-            runs.append({"start": run_start, "length": run_len})
-
+    out, runs, violating = _process(text, args.max, args.whitespace_blank)
     report = {
         "file": args.file,
-        "lines_in": total_lines,
-        "lines_out": len(out_lines),
-        "blank_removed": blanks_removed,
-        "max": args.max,
-        "long_runs": runs,
+        "blank_runs": runs,
+        "violating_runs": violating,
+        "max_blanks": args.max,
+        "check": args.check,
+        "ok": violating == 0,
     }
 
     if args.check:
         if args.json:
-            print(json.dumps(report, indent=2, ensure_ascii=False))
-        else:
-            for r in runs:
-                print(f"run of {r['length']} blank lines starting at line {r['start']}")
-        return 2 if runs else 0
+            print(json.dumps(report, indent=2))
+        elif not args.quiet:
+            status = "ok" if violating == 0 else f"{violating}/{runs} run(s) exceed {args.max} blank(s)"
+            print(f"check: {status}", file=sys.stderr)
+        return 0 if violating == 0 else 2
 
-    sys.stdout.write("".join(l + "\n" for l in out_lines))
+    sys.stdout.write(out)
+    if args.json:
+        print(json.dumps(report, indent=2), file=sys.stderr)
     return 0
 
 
