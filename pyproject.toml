@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "text-collapse-blank-runs"
+version = "1.0.0"
+description = "Collapse runs of consecutive blank lines to at most N"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+
+[project.scripts]
+text-collapse-blank-runs = "text_collapse_blank_runs.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["text_collapse_blank_runs*"]
